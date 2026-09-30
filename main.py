@@ -51,6 +51,7 @@ class AppointmentDialog:
         
         # Store appointments
         self.appointments = []
+        self.selected_appointment_index = None
         
         # Create main layout
         self.create_ui()
@@ -87,7 +88,7 @@ class AppointmentDialog:
         # Website selection
         ttk.Label(left_frame, text="Selecteer Website:", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=5)
         
-        self.website_var = tk.StringVar(value="website")
+        self.website_var = tk.StringVar(value="website1")
         
         websites = [
             ("Website 1", "website1"),
@@ -101,7 +102,7 @@ class AppointmentDialog:
                 text=label,
                 variable=self.website_var,
                 value=value,
-                command=lambda: self.log_action(f"Website geselecteerd: {label}")
+                command=lambda val=value, lbl=label: self.on_website_selected(val, lbl)
             )
             rb.pack(anchor=tk.W, pady=3)
         
@@ -110,8 +111,36 @@ class AppointmentDialog:
         
         # Display current selection
         ttk.Label(left_frame, text="Huidige selectie:", font=("Arial", 9)).pack(anchor=tk.W, pady=5)
-        self.selection_label = ttk.Label(left_frame, text="Geen selectie", foreground="blue")
+        self.selection_label = ttk.Label(left_frame, text="Website 1", foreground="blue")
         self.selection_label.pack(anchor=tk.W, pady=5)
+        
+        # WARNING PANEL for test website (initially hidden)
+        self.warning_frame = ttk.LabelFrame(left_frame, text="⚠️ WAARSCHUWING", padding=10, relief=tk.RAISED)
+        
+        warning_text = ttk.Label(
+            self.warning_frame,
+            text="U heeft de TEST WEBSITE geselecteerd!\n\nDit is een testomgeving.\nGebruik dit alleen voor testen.\n\nVeranderen naar een ander website\nom deze waarschuwing weg te halen.",
+            font=("Arial", 9),
+            foreground="darkred",
+            justify=tk.LEFT
+        )
+        warning_text.pack(anchor=tk.W, pady=5)
+        
+        # Initially hide the warning
+        # (it will be shown when test_website is selected)
+        
+    def on_website_selected(self, value, label):
+        """Handle website selection with persistent warning for test website"""
+        self.selection_label.config(text=label)
+        
+        if value == "test_website":
+            # Show warning frame
+            self.warning_frame.pack(fill=tk.X, pady=10)
+            self.log_action(f"⚠️ TEST WEBSITE geselecteerd - WAARSCHUWING ACTIEF!")
+        else:
+            # Hide warning frame
+            self.warning_frame.pack_forget()
+            self.log_action(f"✅ Website geselecteerd: {label}")
         
     def create_right_column(self, parent):
         """Right column: Appointment creation with repeat options"""
@@ -175,24 +204,49 @@ class AppointmentDialog:
         repeat_count_spinbox.pack(anchor=tk.W, pady=3)
         
         # Add appointment button
-        ttk.Button(
+        self.add_button = ttk.Button(
             right_frame,
             text="➕ Afspraak Toevoegen",
             command=self.add_appointment
-        ).pack(fill=tk.X, pady=10)
+        )
+        self.add_button.pack(fill=tk.X, pady=10)
         
         # List of appointments
         ttk.Label(right_frame, text="Geplande Afspraken:", font=("Arial", 9, "bold")).pack(anchor=tk.W, pady=(10, 3))
         
         self.appointments_listbox = tk.Listbox(right_frame, height=6)
         self.appointments_listbox.pack(fill=tk.BOTH, expand=True, pady=3)
+        self.appointments_listbox.bind('<<ListboxSelect>>', self.on_appointment_selected)
+        
+        # Button frame for actions
+        button_frame = ttk.Frame(right_frame)
+        button_frame.pack(fill=tk.X, pady=3)
         
         # Delete appointment button
-        ttk.Button(
-            right_frame,
+        self.delete_button = ttk.Button(
+            button_frame,
             text="🗑️ Verwijderen",
             command=self.delete_appointment
-        ).pack(fill=tk.X, pady=3)
+        )
+        self.delete_button.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        
+        # Update appointment button
+        self.update_button = ttk.Button(
+            button_frame,
+            text="💾 Wijzigingen Opslaan",
+            command=self.update_appointment,
+            state=tk.DISABLED
+        )
+        self.update_button.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        
+        # Clear form button
+        self.clear_button = ttk.Button(
+            button_frame,
+            text="🔄 Formulier Wissen",
+            command=self.clear_form,
+            state=tk.DISABLED
+        )
+        self.clear_button.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
         
     def create_button_section(self, parent):
         """Create import/export buttons"""
@@ -256,7 +310,76 @@ class AppointmentDialog:
         self.log_text.insert(tk.END, log_message + "\n")
         self.log_text.see(tk.END)  # Auto-scroll to bottom
         self.root.update()
+    
+    def on_appointment_selected(self, event):
+        """Handle appointment selection from listbox"""
+        selection = self.appointments_listbox.curselection()
+        if selection:
+            index = selection[0]
+            self.selected_appointment_index = index
+            apt = self.appointments[index]
+            
+            # Load appointment data into form
+            self.website_var.set(apt["website"])
+            self.on_website_selected(apt["website"], self.get_website_label(apt["website"]))
+            
+            time_parts = apt["time"].split(":")
+            self.hour_var.set(time_parts[0])
+            self.minute_var.set(time_parts[1])
+            
+            self.description_entry.delete(0, tk.END)
+            self.description_entry.insert(0, apt["description"])
+            
+            self.repeat_var.set(apt["repeat"])
+            self.repeat_count_var.set(str(apt["repeat_count"]))
+            
+            # Set days
+            for day in self.days_vars:
+                self.days_vars[day].set(False)
+            
+            if apt["days"] != "Alle dagen":
+                days_list = [d.strip() for d in apt["days"].split(",")]
+                for day in days_list:
+                    if day in self.days_vars:
+                        self.days_vars[day].set(True)
+            
+            # Enable update buttons
+            self.update_button.config(state=tk.NORMAL)
+            self.clear_button.config(state=tk.NORMAL)
+            self.add_button.config(text="📝 Nieuwe Afspraak", state=tk.NORMAL)
+            
+            self.log_action(f"📋 Afspraak geselecteerd: {apt['description']}")
+    
+    def get_website_label(self, value):
+        """Get the label for a website value"""
+        labels = {
+            "website1": "Website 1",
+            "website2": "Website 2",
+            "test_website": "Test Website"
+        }
+        return labels.get(value, value)
+    
+    def clear_form(self):
+        """Clear the form and deselect any selected appointment"""
+        self.selected_appointment_index = None
+        self.website_var.set("website1")
+        self.on_website_selected("website1", "Website 1")
+        self.hour_var.set("09")
+        self.minute_var.set("00")
+        self.description_entry.delete(0, tk.END)
+        self.repeat_var.set("geen")
+        self.repeat_count_var.set("1")
         
+        for day in self.days_vars:
+            self.days_vars[day].set(False)
+        
+        self.appointments_listbox.selection_clear(0, tk.END)
+        self.update_button.config(state=tk.DISABLED)
+        self.clear_button.config(state=tk.DISABLED)
+        self.add_button.config(text="➕ Afspraak Toevoegen")
+        
+        self.log_action("📝 Formulier geleegd")
+    
     def add_appointment(self):
         """Add a new appointment"""
         try:
@@ -285,15 +408,55 @@ class AppointmentDialog:
             
             self.appointments.append(appointment)
             self.update_appointments_list()
+            self.clear_form()
             
             self.log_action(f"✅ Afspraak toegevoegd: {description} om {time_str} op {website}")
-            
-            # Clear input
-            self.description_entry.delete(0, tk.END)
             
         except Exception as e:
             self.log_action(f"❌ Fout bij toevoegen: {str(e)}")
             messagebox.showerror("Fout", f"Fout bij toevoegen: {str(e)}")
+    
+    def update_appointment(self):
+        """Update the selected appointment"""
+        try:
+            if self.selected_appointment_index is None:
+                messagebox.showwarning("Waarschuwing", "Selecteer een afspraak om te wijzigen!")
+                self.log_action("❌ Geen afspraak geselecteerd voor wijziging")
+                return
+            
+            website = self.website_var.get()
+            time_str = f"{self.hour_var.get()}:{self.minute_var.get()}"
+            description = self.description_entry.get()
+            repeat_type = self.repeat_var.get()
+            repeat_count = int(self.repeat_count_var.get())
+            
+            if not description:
+                messagebox.showwarning("Waarschuwing", "Vul een beschrijving in!")
+                self.log_action("❌ Wijziging niet opgeslagen: geen beschrijving")
+                return
+            
+            selected_days = [day for day, var in self.days_vars.items() if var.get()]
+            
+            old_apt = self.appointments[self.selected_appointment_index]
+            
+            self.appointments[self.selected_appointment_index] = {
+                "website": website,
+                "time": time_str,
+                "description": description,
+                "repeat": repeat_type,
+                "repeat_count": repeat_count,
+                "days": ", ".join(selected_days) if selected_days else "Alle dagen",
+                "date_added": old_apt["date_added"]
+            }
+            
+            self.update_appointments_list()
+            self.clear_form()
+            
+            self.log_action(f"✏️ Afspraak bijgewerkt: {old_apt['description']} → {description}")
+            
+        except Exception as e:
+            self.log_action(f"❌ Fout bij bijwerken: {str(e)}")
+            messagebox.showerror("Fout", f"Fout bij bijwerken: {str(e)}")
             
     def delete_appointment(self):
         """Delete selected appointment"""
@@ -307,6 +470,7 @@ class AppointmentDialog:
             index = selection[0]
             deleted = self.appointments.pop(index)
             self.update_appointments_list()
+            self.clear_form()
             
             self.log_action(f"🗑️ Afspraak verwijderd: {deleted['description']}")
             
@@ -374,6 +538,8 @@ class AppointmentDialog:
                 return
             
             imported_count = 0
+            imported_appointments = []
+            
             with open(file_path, 'r', encoding='utf-8') as csvfile:
                 reader = csv.DictReader(csvfile)
                 for row in reader:
@@ -387,11 +553,18 @@ class AppointmentDialog:
                         "date_added": row.get("Datum Toegevoegd", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
                     }
                     self.appointments.append(appointment)
+                    imported_appointments.append(appointment)
                     imported_count += 1
             
             self.update_appointments_list()
-            self.log_action(f"✅ {imported_count} afspraken geïmporteerd uit: {file_path}")
-            messagebox.showinfo("Succes", f"{imported_count} afspraken geïmporteerd!")
+            
+            # Log each imported appointment
+            self.log_action(f"📥 Import gestart: {file_path}")
+            for apt in imported_appointments:
+                self.log_action(f"  ✅ Geïmporteerd: {apt['description']} om {apt['time']} op {apt['website']}")
+            
+            self.log_action(f"✅ Import afgerond: {imported_count} afspraken geïmporteerd")
+            messagebox.showinfo("Succes", f"{imported_count} afspraken geïmporteerd!\nZie het log voor details.")
             
         except Exception as e:
             self.log_action(f"❌ Import fout: {str(e)}")
@@ -411,6 +584,7 @@ class AppointmentDialog:
         if messagebox.askyesno("Bevestiging", "Weet je zeker dat je alle afspraken wilt wissen?"):
             self.appointments.clear()
             self.update_appointments_list()
+            self.clear_form()
             self.log_action("🗑️ Alle afspraken verwijderd")
         else:
             self.log_action("❌ Wissen geannuleerd")
